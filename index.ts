@@ -145,7 +145,7 @@ class FrpsManager {
       }
     }
 
-    const binaryPath = input.binaryPath ?? "frps";
+    const binaryPath = input.binaryPath ?? path.join(process.cwd(), "frps");
     await assertBinaryExists(binaryPath);
 
     const workDir = path.join(this.runtimeRoot, `frps-${id}`);
