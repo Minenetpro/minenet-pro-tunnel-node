@@ -131,3 +131,11 @@ Stop:
 curl -X DELETE 'http://localhost:3000/frps/demo?force=true&timeoutMs=2000' \
   -H 'Authorization: Bearer change-me'
 ```
+
+## Install (Linux + systemd)
+
+Install script to deploy as a systemd service:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wynn-dev/minenet-pro-tunnel-node/refs/heads/main/install.sh | sudo bash
+```
