@@ -73,16 +73,23 @@ class FrpsManager {
 
   async stop(
     id: string,
-    options?: { force?: boolean; timeoutMs?: number }
+    options?: { force?: boolean; timeoutMs?: number; purge?: boolean }
   ): Promise<boolean> {
     const meta = this.processes.get(id);
     if (!meta) return false;
 
+    const { force = false, timeoutMs = 3000, purge = false } = options ?? {};
+
     if (meta.state.status !== "running") {
+      this.processes.delete(id);
+      if (purge) {
+        try {
+          await rm(meta.workDir, { recursive: true, force: true });
+        } catch {}
+      }
       return true;
     }
 
-    const { force = false, timeoutMs = 3000 } = options ?? {};
     try {
       // Send SIGTERM first
       process.kill(meta.state.pid, "SIGTERM");
@@ -102,7 +109,20 @@ class FrpsManager {
       } catch {}
     }
 
-    return true;
+    const alive =
+      current &&
+      current.state.status === "running" &&
+      isProcessAlive(current.state.pid);
+
+    // Remove from registry regardless to reflect deletion intent
+    this.processes.delete(id);
+    if (purge) {
+      try {
+        await rm(meta.workDir, { recursive: true, force: true });
+      } catch {}
+    }
+
+    return !alive;
   }
 
   async create(input: {
@@ -302,6 +322,15 @@ function textResponse(body: string, init: ResponseInit = {}): Response {
   });
 }
 
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function parseUrl(req: Request): URL {
   return new URL(req.url);
 }
@@ -372,9 +401,10 @@ const server = Bun.serve({
           }
           if (req.method === "DELETE") {
             const force = url.searchParams.get("force") === "true";
+            const purge = url.searchParams.get("purge") === "true";
             const timeoutMs = Number(url.searchParams.get("timeoutMs") || 3000);
-            await manager.stop(id, { force, timeoutMs });
-            return jsonResponse({ ok: true });
+            const stopped = await manager.stop(id, { force, timeoutMs, purge });
+            return jsonResponse({ ok: true, stopped });
           }
         } else if (sub === "logs") {
           if (req.method === "GET") {
