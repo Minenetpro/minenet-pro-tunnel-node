@@ -160,6 +160,42 @@ class CaddyClient {
     return (await res.json()) as Record<string, any>;
   }
 
+  async getHttpServer(name: string): Promise<any | null> {
+    const res = await this.fetch(
+      `/config/apps/http/servers/${encodeURIComponent(name)}`
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const msg = await res.text().catch(() => "");
+      throw new HttpError(
+        res.status,
+        msg || `failed to read caddy server ${name}`
+      );
+    }
+    return await res.json();
+  }
+
+  async ensureRoutesArray(name: string): Promise<void> {
+    const server = await this.getHttpServer(name);
+    if (!server) {
+      throw new HttpError(400, `caddy http server '${name}' not found`);
+    }
+    const hasArray = Array.isArray(server.routes);
+    if (!hasArray) {
+      const putRes = await this.fetch(
+        `/config/apps/http/servers/${encodeURIComponent(name)}/routes`,
+        { method: "PUT", body: JSON.stringify([]) }
+      );
+      if (!putRes.ok) {
+        const text = await putRes.text().catch(() => "");
+        throw new HttpError(
+          putRes.status,
+          text || `failed to init routes for server '${name}'`
+        );
+      }
+    }
+  }
+
   async listReverseProxies(targetServer?: string) {
     const servers = await this.getHttpServers();
     const items: Array<{
@@ -200,6 +236,7 @@ class CaddyClient {
   }
 
   async createReverseProxy(input: CreateProxyBody) {
+    await this.ensureRoutesArray(input.server);
     const route = {
       "@id": input.id ?? `rp-${crypto.randomUUID()}`,
       match: [
