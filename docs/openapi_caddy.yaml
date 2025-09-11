@@ -1,0 +1,272 @@
+openapi: 3.1.0
+info:
+  title: Caddy Manager API
+  version: 1.0.0
+  description: |
+    Management API for creating, listing, and deleting Caddy reverse proxy routes.
+
+    - All endpoints except `/healthz` require a bearer token in the `Authorization` header.
+    - The token must match the `CADDY_API_SECRET` environment variable.
+servers:
+  - url: http://127.0.0.1:{port}
+    description: Local development
+    variables:
+      port:
+        default: "3001"
+security:
+  - bearerAuth: []
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      description: Returns `ok` when the service is running.
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ok
+  /proxies:
+    get:
+      summary: List reverse proxy routes
+      description: Returns reverse proxy routes discovered in Caddy HTTP servers.
+      parameters:
+        - in: query
+          name: server
+          required: false
+          schema:
+            type: string
+          description: Filter by Caddy HTTP server name (e.g., `srv0`).
+      responses:
+        "200":
+          description: List of reverse proxy routes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReverseProxy"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    post:
+      summary: Create a reverse proxy route
+      description: Appends a new route to the specified Caddy HTTP server's routes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProxyRequest"
+            examples:
+              basic:
+                summary: Basic reverse proxy
+                value:
+                  server: srv0
+                  hosts: ["example.com"]
+                  upstreams: ["127.0.0.1:8080"]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedReverseProxyResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /proxies/{id}:
+    delete:
+      summary: Delete a reverse proxy route by @id
+      description: Deletes the Caddy route with the given `@id` using Caddy's `/id/{id}` admin endpoint.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: The Caddy route `@id` set during creation or by Caddy Manager.
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  responses:
+    BadRequest:
+      description: Bad Request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            invalidJson:
+              value:
+                error: invalid JSON body
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            missing:
+              value:
+                error: missing bearer token
+            invalid:
+              value:
+                error: invalid token
+    Forbidden:
+      description: Invalid token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            notFound:
+              value:
+                error: not found
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            internal:
+              value:
+                error: internal error
+  schemas:
+    ReverseProxy:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Caddy route @id if present
+        server:
+          type: string
+          description: Name of the Caddy HTTP server containing the route
+        hosts:
+          type: array
+          items: { type: string }
+          description: Hostnames matched by the route
+        upstreams:
+          type: array
+          items: { type: string }
+          description: Upstream dial targets
+        route:
+          type: object
+          additionalProperties: true
+          description: Raw Caddy route object
+      required: [server]
+      additionalProperties: false
+    CreateProxyRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Optional explicit Caddy route @id
+        server:
+          type: string
+          description: Target Caddy HTTP server name (e.g., srv0)
+        hosts:
+          description: Hostnames to match
+          oneOf:
+            - type: string
+            - type: array
+              items: { type: string }
+        upstreams:
+          type: array
+          items: { type: string }
+          minItems: 1
+          description: Upstream dial targets (e.g., 127.0.0.1:8080)
+        terminal:
+          type: boolean
+          default: true
+          description: Whether the route is terminal in Caddy's routing chain
+      required: [server, hosts, upstreams]
+      additionalProperties: false
+    CaddyRoute:
+      type: object
+      description: Caddy HTTP route object (as created by this API)
+      properties:
+        "@id":
+          type: string
+        match:
+          type: array
+          items:
+            type: object
+            properties:
+              host:
+                type: array
+                items: { type: string }
+            required: [host]
+            additionalProperties: true
+        handle:
+          type: array
+          items:
+            type: object
+            properties:
+              handler:
+                type: string
+                enum: [reverse_proxy]
+              upstreams:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    dial: { type: string }
+                  required: [dial]
+                  additionalProperties: true
+            required: [handler, upstreams]
+            additionalProperties: true
+        terminal:
+          type: boolean
+          default: true
+      required: ["@id", match, handle]
+      additionalProperties: true
+    CreatedReverseProxyResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          const: true
+        route:
+          $ref: "#/components/schemas/CaddyRoute"
+      required: [ok, route]
+      additionalProperties: false
+    OkResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          const: true
+      required: [ok]
+      additionalProperties: false
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+      additionalProperties: false
